@@ -1,60 +1,68 @@
-// server.js
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
-
-// allow your dashboard origin; use "*" while testing
-app.use(cors({ origin: "*"}));
+app.use(cors());
 app.use(express.json());
 
-// simple health check
-app.get("/health", (req, res) => {
-  res.json({ ok: true, ts: Date.now() });
-});
+// quick health check
+app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// log every request so you can see what route you actually hit
-app.use((req, _res, next) => {
-  console.log(`[REQ] ${req.method} ${req.path} query=`, req.query);
-  next();
-});
+function buildUpstreamUrl(req) {
+  // supports both styles:
+  //  - /proxy/<anything>   e.g. /proxy/v2/calls?limit=50
+  //  - /api/proxy?path=<anything>  e.g. /api/proxy?path=v2/calls&limit=50
+  if (req.path.startsWith("/proxy/")) {
+    const tail = req.path.replace(/^\/proxy\//, "");
+    const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    return `https://api.vapi.ai/${tail}${qs}`;
+  }
+  if (req.path === "/api/proxy" && req.query.path) {
+    const tail = String(req.query.path).replace(/^\//, "");
+    const qs = Object.entries(req.query)
+      .filter(([k]) => k !== "path")
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
+    return `https://api.vapi.ai/${tail}${qs ? "?" + qs : ""}`;
+  }
+  return null;
+}
 
-// PROXY: everything after /proxy/ is forwarded to Vapi
-app.all("/proxy/*", async (req, res) => {
-  const path = req.params[0]; // e.g. "v2/calls"
-  if (!path) return res.status(400).json({ error: "Missing target path after /proxy/" });
+app.all(["/proxy/*", "/api/proxy"], async (req, res) => {
+  const url = buildUpstreamUrl(req);
+  if (!url) return res.status(400).json({ error: "Missing path" });
 
-  const url = `https://api.vapi.ai/${path}`;
   try {
-    const response = await fetch(url, {
+    const upstream = await fetch(url, {
       method: req.method,
       headers: {
-        "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.VAPI_PRIVATE_API}`,
+        "Content-Type": "application/json",
       },
-      body: req.method !== "GET" ? JSON.stringify(req.body) : undefined,
+      body:
+        req.method !== "GET" && req.method !== "HEAD"
+          ? JSON.stringify(req.body)
+          : undefined,
     });
 
-    const text = await response.text(); // handle non-JSON bodies safely
-    let data;
-    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    const bodyText = await upstream.text();
 
-    res.status(response.status).json(data);
+    // log what happened (visible in Render > Logs)
+    console.log(`[${upstream.status}] ${req.method} -> ${url} :: ${bodyText.slice(0, 200)}`);
+
+    // try to return JSON; otherwise return raw text
+    try {
+      const json = JSON.parse(bodyText);
+      return res.status(upstream.status).json(json);
+    } catch {
+      res.set("Content-Type", "text/plain");
+      return res.status(upstream.status).send(bodyText);
+    }
   } catch (err) {
     console.error("Proxy error:", err);
-    res.status(500).json({ error: err.message || "Proxy failed" });
+    return res.status(502).json({ error: "Upstream error", detail: String(err) });
   }
 });
 
-// 404 handler to make mistakes obvious
-app.use((req, res) => {
-  res.status(404).json({
-    error: "Route not found",
-    hint: "Use /proxy/<vapi-path>, e.g. /proxy/v2/calls",
-    path: req.path
-  });
-});
-
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Proxy listening on ${PORT}`));
