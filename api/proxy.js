@@ -1,17 +1,19 @@
 // api/proxy.js
 export default async function handler(req, res) {
-  const { path } = req.query;
+  // Expect ?path=v2/calls
+  const path = req.query.path;
 
   if (!path) {
     return res.status(400).json({ error: "Missing path parameter" });
   }
 
   try {
-    const response = await fetch(`https://api.vapi.ai/${path}`, {
+    const url = `https://api.vapi.ai/${path}`;
+    const response = await fetch(url, {
       method: req.method,
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.VAPI_PRIVATE_API}`
+        "Authorization": `Bearer ${process.env.VAPI_PRIVATE_API}`,
       },
       body: req.method !== "GET" ? JSON.stringify(req.body) : undefined,
     });
