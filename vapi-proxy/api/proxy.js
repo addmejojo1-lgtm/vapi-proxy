@@ -1,5 +1,6 @@
 // api/proxy.js
 export default async function handler(req, res) {
+  // Full path comes from query, e.g. /api/proxy?path=v2/calls
   const { path } = req.query;
 
   if (!path) {
@@ -7,11 +8,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(`https://api.vapi.ai/${path}`, {
+    const url = `https://api.vapi.ai/${path}`;
+    const response = await fetch(url, {
       method: req.method,
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.VAPI_PRIVATE_API}`
+        "Authorization": `Bearer ${process.env.VAPI_PRIVATE_API}`,
       },
       body: req.method !== "GET" ? JSON.stringify(req.body) : undefined,
     });
