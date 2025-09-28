@@ -2,9 +2,9 @@
   "name": "vapi-proxy",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "start": "vercel dev"
+    "start": "node api/proxy.js"
   },
   "dependencies": {}
 }
